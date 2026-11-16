@@ -15,8 +15,8 @@ Prototipo FPS en primera persona inspirado en una arena de práctica: movimiento
 - Móvil: lado izquierdo para desplazamiento, arrastra el lado derecho para mirar; botones FIRE, RELOAD y RAGDOLL.
 - El botón RAGDOLL crea muñecos de práctica adicionales; dispararles activa articulaciones y física.
 
-## Shaders/materiales
-Se usan materiales `Standard` del shader Built-in de Unity y colores asignados por código; no hay referencias a shaders URP/HDRP ni texturas externas que puedan quedar magenta por incompatibilidad. El proyecto no instala URP/HDRP.
+## Pantalla, orientación y shaders
+El proyecto está fijado en horizontal (landscape) en Player Settings y por código antes de cargar la escena. La escena incluye un bootstrap explícito. Los materiales usan un shader de color propio, empaquetado bajo `Assets/Shaders` y referenciado por un material en `Resources`, para que Unity lo incluya en el build y no dependa de shaders URP/HDRP ni de búsquedas que puedan perderse al compilar. Si el arranque falla, el juego muestra un mensaje de error en pantalla en vez de quedar negro.
 
 ## Audio
 Efectos de disparo/recarga/impacto generados proceduralmente en ejecución, sin archivos de audio ni licencias externas.
