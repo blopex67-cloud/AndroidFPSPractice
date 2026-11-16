@@ -17,9 +17,23 @@ public class FpsArenaGame : MonoBehaviour
     readonly List<PracticeDummy> dummies = new List<PracticeDummy>();
     Material floorMat, wallMat, weaponMat, trimMat;
 
-    void Awake(){ I=this; }
-    void Start(){ Application.targetFrameRate=60; BuildWorld(); BuildPlayer(); BuildHud(); BuildAudio(); }
-    Material Mat(Color c){ var m=new Material(Shader.Find("Standard")); m.color=c; m.enableInstancing=true; return m; }
+    void Awake(){ I=this; Screen.orientation=ScreenOrientation.LandscapeLeft; Screen.autorotateToPortrait=false; Screen.autorotateToPortraitUpsideDown=false; Screen.autorotateToLandscapeLeft=true; Screen.autorotateToLandscapeRight=true; Screen.sleepTimeout=SleepTimeout.NeverSleep; }
+    void Start(){
+        Application.targetFrameRate=60;
+        try { BuildWorld(); BuildPlayer(); BuildHud(); BuildAudio(); }
+        catch(System.Exception e){ Debug.LogException(e); ShowStartupError(e); }
+    }
+    Material Mat(Color c){
+        Material template=Resources.Load<Material>("ArenaMaterial");
+        if(template==null) throw new System.Exception("No se encontró ArenaMaterial en Assets/Resources.");
+        var m=new Material(template); m.color=c; m.enableInstancing=true; return m;
+    }
+    void ShowStartupError(System.Exception e){
+        if(cam==null){ var go=new GameObject("Startup fallback camera"); cam=go.AddComponent<Camera>(); go.tag="MainCamera"; cam.clearFlags=CameraClearFlags.SolidColor; cam.backgroundColor=new Color(.08f,.12f,.17f); }
+        var canvasGo=new GameObject("Startup error screen"); var canvas=canvasGo.AddComponent<Canvas>(); canvas.renderMode=RenderMode.ScreenSpaceOverlay;
+        var text=Label(canvas.transform,"NO SE PUDO INICIAR LA ARENA\n"+e.GetType().Name+": "+e.Message,new Vector2(.5f,.5f),new Vector2(.5f,.5f),new Vector2(1000,240),28,Color.white,TextAnchor.MiddleCenter);
+        text.horizontalOverflow=HorizontalWrapMode.Wrap; Debug.LogError("FPS startup failed: "+e);
+    }
     GameObject Cube(string n, Vector3 pos, Vector3 scale, Material m, Transform parent=null){ var g=GameObject.CreatePrimitive(PrimitiveType.Cube); g.name=n; g.transform.position=pos; g.transform.localScale=scale; if(parent)g.transform.SetParent(parent,true); g.GetComponent<Renderer>().sharedMaterial=m; return g; }
     void BuildWorld(){
         floorMat=Mat(new Color(.19f,.23f,.28f)); wallMat=Mat(new Color(.57f,.62f,.68f)); weaponMat=Mat(new Color(.10f,.13f,.17f)); trimMat=Mat(new Color(.95f,.35f,.06f));
@@ -48,7 +62,7 @@ public class FpsArenaGame : MonoBehaviour
         Button(canvas.transform,"RAGDOLL",new Vector2(.72f,.07f),new Vector2(165,58),new Color(.22f,.34f,.22f),()=>SpawnDummy(new Vector3(Random.Range(-5,5),0,Random.Range(2,8))));
         Label(canvas.transform,"Arrastra el lado derecho para mirar",new Vector2(.76f,.42f),new Vector2(.76f,.42f),new Vector2(350,45),17,new Color(1,1,1,.75f),TextAnchor.MiddleCenter);
     }
-    Text Label(Transform parent,string s,Vector2 amin,Vector2 amax,Vector2 size,int fs,Color col,TextAnchor anchor){ var g=new GameObject("Label"); g.transform.SetParent(parent,false); var r=g.AddComponent<RectTransform>(); r.anchorMin=amin;r.anchorMax=amax;r.anchoredPosition=Vector2.zero;r.sizeDelta=size; var t=g.AddComponent<Text>();t.text=s;t.font=Resources.GetBuiltinResource<Font>("Arial.ttf");t.fontSize=fs;t.color=col;t.alignment=anchor;t.horizontalOverflow=HorizontalWrapMode.Overflow;t.verticalOverflow=VerticalWrapMode.Overflow;return t; }
+    Text Label(Transform parent,string s,Vector2 amin,Vector2 amax,Vector2 size,int fs,Color col,TextAnchor anchor){ var g=new GameObject("Label"); g.transform.SetParent(parent,false); var r=g.AddComponent<RectTransform>(); r.anchorMin=amin;r.anchorMax=amax;r.anchoredPosition=Vector2.zero;r.sizeDelta=size; var t=g.AddComponent<Text>();t.text=s;t.font=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); if(t.font==null)t.font=Resources.GetBuiltinResource<Font>("Arial.ttf");t.fontSize=fs;t.color=col;t.alignment=anchor;t.horizontalOverflow=HorizontalWrapMode.Overflow;t.verticalOverflow=VerticalWrapMode.Overflow;return t; }
     void Button(Transform parent,string s,Vector2 anchor,Vector2 size,Color color,UnityEngine.Events.UnityAction action){ var g=new GameObject(s+" Button");g.transform.SetParent(parent,false);var r=g.AddComponent<RectTransform>();r.anchorMin=anchor;r.anchorMax=anchor;r.anchoredPosition=Vector2.zero;r.sizeDelta=size;var im=g.AddComponent<Image>();im.color=color;var b=g.AddComponent<Button>();b.targetGraphic=im;b.onClick.AddListener(action);var t=Label(g.transform,s,new Vector2(0,0),new Vector2(1,1),Vector2.zero,22,Color.white,TextAnchor.MiddleCenter);t.fontStyle=FontStyle.Bold; }
     void BuildAudio(){ audioSource=gameObject.AddComponent<AudioSource>(); audioSource.spatialBlend=0; shotClip=Tone("Shot",120,.09f);reloadClip=Tone("Reload",480,.18f);hitClip=Tone("Hit",760,.08f); }
     AudioClip Tone(string n,float hz,float sec){int sr=22050, count=(int)(sr*sec);float[] d=new float[count];for(int i=0;i<count;i++){float env=1f-(float)i/count;d[i]=Mathf.Sin(2*Mathf.PI*hz*i/sr)*env*.35f;}var a=AudioClip.Create(n,count,1,sr,false);a.SetData(d,0);return a;}
