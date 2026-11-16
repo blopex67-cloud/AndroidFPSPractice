@@ -6,6 +6,7 @@ Prototipo FPS en primera persona inspirado en una arena de práctica: movimiento
 - Unity **6000.0.23f1** o una versión 6 compatible.
 - Abre la carpeta `unity/` como proyecto.
 - En Build Profiles elige Android y cambia la plataforma.
+- Para un servicio de build conectado a GitHub, usa este repo y deja el **Project subdirectory** como `unity` (respeta minúsculas); la escena `Assets/Scenes/FPSArena.unity` ya está en Build Settings.
 - Orientation: Landscape. Activa ARM64 y crea un APK para probar.
 - No requiere escena preconfigurada: `Bootstrap` crea el prototipo al iniciar Play/build.
 
