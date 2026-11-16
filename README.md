@@ -12,11 +12,14 @@ Prototipo FPS en primera persona inspirado en una arena de práctica: movimiento
 
 ## Controles
 - PC: WASD/flechas, mouse para mirar, clic para disparar, R para recargar.
-- Móvil: lado izquierdo para desplazamiento, arrastra el lado derecho para mirar; botones FIRE, RELOAD y RAGDOLL.
+- Móvil horizontal: joystick analógico real a la izquierda; arrastra el área libre derecha para mirar; FIRE, RECARGAR y MUÑECO están agrupados a la derecha. La munición y objetivos se leen en una placa superior compacta.
 - El botón RAGDOLL crea muñecos de práctica adicionales; dispararles activa articulaciones y física.
 
 ## Pantalla, orientación y shaders
 El proyecto está fijado en horizontal (landscape) en Player Settings y por código antes de cargar la escena. La escena incluye un bootstrap explícito. Los materiales usan un shader de color propio, empaquetado bajo `Assets/Shaders` y referenciado por un material en `Resources`, para que Unity lo incluya en el build y no dependa de shaders URP/HDRP ni de búsquedas que puedan perderse al compilar. Si el arranque falla, el juego muestra un mensaje de error en pantalla en vez de quedar negro.
+
+## Presentación y controles (revisión)
+Se rehízo el HUD para 1920×1080 con escala adaptable, lectura separada de munición/objetivos y áreas táctiles más grandes. Los maniquíes se construyen con torso, cabeza, pelvis, brazos y piernas enlazados; ya no son cápsulas sin articulaciones.
 
 ## Audio
 Efectos de disparo/recarga/impacto generados proceduralmente en ejecución, sin archivos de audio ni licencias externas.
