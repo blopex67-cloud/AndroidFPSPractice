@@ -6,94 +6,480 @@ using System.Collections.Generic;
 public class FpsArenaGame : MonoBehaviour
 {
     public static FpsArenaGame I;
-    public CharacterController player;
-    public Camera cam;
-    public Text hud;
-    public int ammo = 8, reserve = 48, targetsDown;
-    public bool reloading;
+    CharacterController controller;
+    Camera viewCamera;
+    Text objectiveLabel, ammoLabel, messageLabel;
+    RectTransform reticle;
     AudioSource audioSource;
     AudioClip shotClip, reloadClip, hitClip;
-    float fireAt, reloadDone;
+    Material concrete, darkMetal, orange, targetMat, weaponMat;
+    int ammo = 8, reserve = 48, targetsDown;
+    bool isReloading;
+    float reloadEnds, nextShot, verticalVelocity, messageEnds;
     readonly List<PracticeDummy> dummies = new List<PracticeDummy>();
-    Material floorMat, wallMat, weaponMat, trimMat;
+    MobileStick stick;
+    Transform weaponRoot;
+    Vector2 lookLast;
+    int lookFinger = -1;
 
-    void Awake(){ I=this; Screen.orientation=ScreenOrientation.LandscapeLeft; Screen.autorotateToPortrait=false; Screen.autorotateToPortraitUpsideDown=false; Screen.autorotateToLandscapeLeft=true; Screen.autorotateToLandscapeRight=true; Screen.sleepTimeout=SleepTimeout.NeverSleep; }
-    void Start(){
-        Application.targetFrameRate=60;
-        try { BuildWorld(); BuildPlayer(); BuildHud(); BuildAudio(); }
-        catch(System.Exception e){ Debug.LogException(e); ShowStartupError(e); }
+    void Awake()
+    {
+        I = this;
+        Screen.orientation = ScreenOrientation.LandscapeLeft;
+        Screen.autorotateToPortrait = false;
+        Screen.autorotateToPortraitUpsideDown = false;
+        Screen.autorotateToLandscapeLeft = true;
+        Screen.autorotateToLandscapeRight = true;
+        Screen.sleepTimeout = SleepTimeout.NeverSleep;
     }
-    Material Mat(Color c){
-        Material template=Resources.Load<Material>("ArenaMaterial");
-        if(template==null) throw new System.Exception("No se encontró ArenaMaterial en Assets/Resources.");
-        var m=new Material(template); m.color=c; m.enableInstancing=true; return m;
+
+    void Start()
+    {
+        Application.targetFrameRate = 60;
+        try
+        {
+            BuildMaterials();
+            BuildArena();
+            BuildPlayer();
+            BuildHud();
+            BuildAudio();
+            UpdateHud();
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogException(e);
+            ShowStartupError(e);
+        }
     }
-    void ShowStartupError(System.Exception e){
-        if(cam==null){ var go=new GameObject("Startup fallback camera"); cam=go.AddComponent<Camera>(); go.tag="MainCamera"; cam.clearFlags=CameraClearFlags.SolidColor; cam.backgroundColor=new Color(.08f,.12f,.17f); }
-        var canvasGo=new GameObject("Startup error screen"); var canvas=canvasGo.AddComponent<Canvas>(); canvas.renderMode=RenderMode.ScreenSpaceOverlay;
-        var text=Label(canvas.transform,"NO SE PUDO INICIAR LA ARENA\n"+e.GetType().Name+": "+e.Message,new Vector2(.5f,.5f),new Vector2(.5f,.5f),new Vector2(1000,240),28,Color.white,TextAnchor.MiddleCenter);
-        text.horizontalOverflow=HorizontalWrapMode.Wrap; Debug.LogError("FPS startup failed: "+e);
+
+    Material MakeMaterial(Color tint)
+    {
+        Material template = Resources.Load<Material>("ArenaMaterial");
+        if (template == null) throw new System.Exception("Falta Assets/Resources/ArenaMaterial.mat");
+        Material m = new Material(template);
+        m.color = tint;
+        return m;
     }
-    GameObject Cube(string n, Vector3 pos, Vector3 scale, Material m, Transform parent=null){ var g=GameObject.CreatePrimitive(PrimitiveType.Cube); g.name=n; g.transform.position=pos; g.transform.localScale=scale; if(parent)g.transform.SetParent(parent,true); g.GetComponent<Renderer>().sharedMaterial=m; return g; }
-    void BuildWorld(){
-        floorMat=Mat(new Color(.19f,.23f,.28f)); wallMat=Mat(new Color(.57f,.62f,.68f)); weaponMat=Mat(new Color(.10f,.13f,.17f)); trimMat=Mat(new Color(.95f,.35f,.06f));
-        Cube("Arena floor",new Vector3(0,-.25f,0),new Vector3(22,.5f,22),floorMat);
-        Cube("North wall",new Vector3(0,2.3f,10.8f),new Vector3(22,5,0.4f),wallMat); Cube("South wall",new Vector3(0,2.3f,-10.8f),new Vector3(22,5,.4f),wallMat);
-        Cube("East wall",new Vector3(10.8f,2.3f,0),new Vector3(.4f,5,22),wallMat); Cube("West wall",new Vector3(-10.8f,2.3f,0),new Vector3(.4f,5,22),wallMat);
-        Cube("Back accent",new Vector3(0,.25f,10.55f),new Vector3(22,.18f,.14f),trimMat);
-        var light=new GameObject("Arena light").AddComponent<Light>(); light.type=LightType.Directional; light.intensity=1.15f; light.transform.rotation=Quaternion.Euler(48,-32,0); RenderSettings.ambientLight=new Color(.52f,.58f,.67f); RenderSettings.ambientMode=UnityEngine.Rendering.AmbientMode.Flat;
-        for(int i=0;i<4;i++) SpawnDummy(new Vector3((i-1.5f)*3f,0,5.5f+(i%2)*1.3f));
-        for(int i=-1;i<=1;i++) Cube("Target stand",new Vector3(i*4,.35f,7.9f),new Vector3(.6f,.7f,.6f),weaponMat);
+
+    void BuildMaterials()
+    {
+        concrete = MakeMaterial(new Color(.24f, .29f, .34f));
+        darkMetal = MakeMaterial(new Color(.055f, .085f, .12f));
+        orange = MakeMaterial(new Color(1f, .28f, .055f));
+        targetMat = MakeMaterial(new Color(.83f, .12f, .075f));
+        weaponMat = MakeMaterial(new Color(.075f, .105f, .13f));
     }
-    void BuildPlayer(){
-        var p=new GameObject("Player"); p.transform.position=new Vector3(0,0,-6.5f); player=p.AddComponent<CharacterController>(); player.height=1.8f; player.radius=.34f; player.center=new Vector3(0,.9f,0); player.slopeLimit=45; player.stepOffset=.3f;
-        var c=new GameObject("Player camera"); c.transform.SetParent(p.transform); c.transform.localPosition=new Vector3(0,1.58f,0); cam=c.AddComponent<Camera>(); cam.fieldOfView=75; cam.nearClipPlane=.03f; cam.tag="MainCamera";
-        var gun=Cube("Training blaster",new Vector3(.32f,-.25f,.65f),new Vector3(.18f,.2f,.65f),weaponMat,cam.transform); gun.transform.localRotation=Quaternion.Euler(2,0,0);
-        Cube("Blaster barrel",new Vector3(.32f,-.17f,1.01f),new Vector3(.1f,.1f,.35f),trimMat,cam.transform);
+
+    GameObject Box(string label, Vector3 pos, Vector3 size, Material mat, Transform parent = null)
+    {
+        GameObject g = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        g.name = label;
+        if (parent != null)
+        {
+            g.transform.SetParent(parent, false);
+            g.transform.localPosition = pos;
+            g.transform.localScale = size;
+        }
+        else
+        {
+            g.transform.position = pos;
+            g.transform.localScale = size;
+        }
+        Renderer r = g.GetComponent<Renderer>();
+        r.sharedMaterial = mat;
+        return g;
     }
-    void BuildHud(){
-        var canvasGo=new GameObject("Mobile HUD"); var canvas=canvasGo.AddComponent<Canvas>(); canvas.renderMode=RenderMode.ScreenSpaceOverlay; canvas.sortingOrder=10;
-        canvasGo.AddComponent<CanvasScaler>().uiScaleMode=CanvasScaler.ScaleMode.ScaleWithScreenSize; canvasGo.GetComponent<CanvasScaler>().referenceResolution=new Vector2(1280,720); canvasGo.GetComponent<CanvasScaler>().matchWidthOrHeight=.5f; canvasGo.AddComponent<GraphicRaycaster>();
-        var ev=new GameObject("EventSystem"); ev.AddComponent<EventSystem>(); ev.AddComponent<StandaloneInputModule>();
-        hud=Label(canvas.transform,"",new Vector2(.5f,.96f),new Vector2(.5f,.96f),new Vector2(500,70),32,Color.white,TextAnchor.MiddleCenter);
-        Label(canvas.transform,"MOVE",new Vector2(.1f,.13f),new Vector2(.1f,.13f),new Vector2(150,45),20,new Color(1,1,1,.85f),TextAnchor.MiddleCenter);
-        Button(canvas.transform,"FIRE",new Vector2(.88f,.19f),new Vector2(160,100),new Color(.85f,.2f,.08f),()=>Shoot());
-        Button(canvas.transform,"RELOAD",new Vector2(.88f,.06f),new Vector2(160,58),new Color(.16f,.26f,.38f),()=>Reload());
-        Button(canvas.transform,"RAGDOLL",new Vector2(.72f,.07f),new Vector2(165,58),new Color(.22f,.34f,.22f),()=>SpawnDummy(new Vector3(Random.Range(-5,5),0,Random.Range(2,8))));
-        Label(canvas.transform,"Arrastra el lado derecho para mirar",new Vector2(.76f,.42f),new Vector2(.76f,.42f),new Vector2(350,45),17,new Color(1,1,1,.75f),TextAnchor.MiddleCenter);
+
+    void BuildArena()
+    {
+        RenderSettings.ambientLight = new Color(.55f, .59f, .64f);
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
+        RenderSettings.fog = true;
+        RenderSettings.fogColor = new Color(.25f, .31f, .37f);
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogStartDistance = 15;
+        RenderSettings.fogEndDistance = 36;
+
+        Box("Range floor", new Vector3(0, -.25f, 0), new Vector3(24, .5f, 26), concrete);
+        Box("Rear wall", new Vector3(0, 3, 12.8f), new Vector3(24, 6, .5f), darkMetal);
+        Box("Left wall", new Vector3(-12, 3, 0), new Vector3(.5f, 6, 26), darkMetal);
+        Box("Right wall", new Vector3(12, 3, 0), new Vector3(.5f, 6, 26), darkMetal);
+        Box("Rear orange stripe", new Vector3(0, .42f, 12.51f), new Vector3(23, .12f, .12f), orange);
+        Box("Left orange stripe", new Vector3(-11.72f, .42f, 0), new Vector3(.12f, .12f, 25), orange);
+        Box("Right orange stripe", new Vector3(11.72f, .42f, 0), new Vector3(.12f, .12f, 25), orange);
+
+        for (int i = -2; i <= 2; i++)
+        {
+            Box("Floor lane marking", new Vector3(i * 3.2f, .012f, 1.5f), new Vector3(.045f, .02f, 17), orange);
+            Box("Target bay", new Vector3(i * 3.2f, 2.35f, 11.9f), new Vector3(2.45f, .06f, .12f), orange);
+            Box("Ceiling light", new Vector3(i * 4.2f, 5.7f, 2f), new Vector3(2.2f, .08f, .5f), orange);
+        }
+        Box("Ceiling", new Vector3(0, 6.2f, 0), new Vector3(24, .35f, 26), darkMetal);
+
+        GameObject lightObject = new GameObject("Range key light");
+        Light mainLight = lightObject.AddComponent<Light>();
+        mainLight.type = LightType.Directional;
+        mainLight.intensity = 1.1f;
+        lightObject.transform.rotation = Quaternion.Euler(48, -28, 0);
+        for (int i = 0; i < 5; i++)
+        {
+            float x = (i - 2) * 3.2f;
+            SpawnDummy(new Vector3(x, 0, 7.6f + (i % 2) * 1.2f));
+        }
     }
-    Text Label(Transform parent,string s,Vector2 amin,Vector2 amax,Vector2 size,int fs,Color col,TextAnchor anchor){ var g=new GameObject("Label"); g.transform.SetParent(parent,false); var r=g.AddComponent<RectTransform>(); r.anchorMin=amin;r.anchorMax=amax;r.anchoredPosition=Vector2.zero;r.sizeDelta=size; var t=g.AddComponent<Text>();t.text=s;t.font=Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf"); if(t.font==null)t.font=Resources.GetBuiltinResource<Font>("Arial.ttf");t.fontSize=fs;t.color=col;t.alignment=anchor;t.horizontalOverflow=HorizontalWrapMode.Overflow;t.verticalOverflow=VerticalWrapMode.Overflow;return t; }
-    void Button(Transform parent,string s,Vector2 anchor,Vector2 size,Color color,UnityEngine.Events.UnityAction action){ var g=new GameObject(s+" Button");g.transform.SetParent(parent,false);var r=g.AddComponent<RectTransform>();r.anchorMin=anchor;r.anchorMax=anchor;r.anchoredPosition=Vector2.zero;r.sizeDelta=size;var im=g.AddComponent<Image>();im.color=color;var b=g.AddComponent<Button>();b.targetGraphic=im;b.onClick.AddListener(action);var t=Label(g.transform,s,new Vector2(0,0),new Vector2(1,1),Vector2.zero,22,Color.white,TextAnchor.MiddleCenter);t.fontStyle=FontStyle.Bold; }
-    void BuildAudio(){ audioSource=gameObject.AddComponent<AudioSource>(); audioSource.spatialBlend=0; shotClip=Tone("Shot",120,.09f);reloadClip=Tone("Reload",480,.18f);hitClip=Tone("Hit",760,.08f); }
-    AudioClip Tone(string n,float hz,float sec){int sr=22050, count=(int)(sr*sec);float[] d=new float[count];for(int i=0;i<count;i++){float env=1f-(float)i/count;d[i]=Mathf.Sin(2*Mathf.PI*hz*i/sr)*env*.35f;}var a=AudioClip.Create(n,count,1,sr,false);a.SetData(d,0);return a;}
-    void Update(){
-        if(player==null)return;
-        float x=Input.GetAxisRaw("Horizontal"),z=Input.GetAxisRaw("Vertical"); Vector3 move=player.transform.right*x+player.transform.forward*z;
-        if(Input.touchCount>0){ Touch t=Input.GetTouch(0); if(t.position.x<Screen.width*.48f){Vector2 v=new Vector2(t.position.x/Screen.width-.12f,t.position.y/Screen.height-.13f);move=player.transform.right*Mathf.Clamp(v.x*3,-1,1)+player.transform.forward*Mathf.Clamp(v.y*3,-1,1);} }
-        player.Move((move*4.1f+Vector3.down*1.5f)*Time.deltaTime);
-        if(Input.GetMouseButton(0)&&Input.mousePosition.x>Screen.width*.5f){cam.transform.localRotation*=Quaternion.Euler(-Input.GetAxis("Mouse Y")*2,0,0);player.transform.Rotate(0,Input.GetAxis("Mouse X")*2,0);}
-        if(Input.GetKeyDown(KeyCode.Space))Shoot();if(Input.GetKeyDown(KeyCode.R))Reload();
-        foreach(Touch t in Input.touches){if(t.phase==TouchPhase.Moved && t.position.x>Screen.width*.45f){float sens=.12f;player.transform.Rotate(0,t.deltaPosition.x*sens,0);cam.transform.Rotate(-t.deltaPosition.y*sens,0,0);var e=cam.transform.localEulerAngles;e.x=(e.x>180?e.x-360:e.x);e.x=Mathf.Clamp(e.x,-75,75);cam.transform.localEulerAngles=new Vector3(e.x,0,0);}}
-        if(reloading&&Time.time>reloadDone){int n=Mathf.Min(8-ammo,reserve);ammo+=n;reserve-=n;reloading=false;}
-        hud.text="ARENA DE PRÁCTICA     OBJETIVOS: "+targetsDown+"     " +(reloading?"RECARGANDO":"MUNICIÓN  "+ammo+" / "+reserve);
+
+    void BuildPlayer()
+    {
+        GameObject playerObject = new GameObject("FPS Player");
+        playerObject.transform.position = new Vector3(0, 0, -7.5f);
+        controller = playerObject.AddComponent<CharacterController>();
+        controller.height = 1.8f;
+        controller.radius = .32f;
+        controller.center = new Vector3(0, .9f, 0);
+        controller.stepOffset = .3f;
+
+        GameObject cameraObject = new GameObject("FPS View");
+        cameraObject.transform.SetParent(playerObject.transform, false);
+        cameraObject.transform.localPosition = new Vector3(0, 1.58f, 0);
+        viewCamera = cameraObject.AddComponent<Camera>();
+        viewCamera.tag = "MainCamera";
+        viewCamera.fieldOfView = 72;
+        viewCamera.nearClipPlane = .04f;
+        viewCamera.clearFlags = CameraClearFlags.SolidColor;
+        viewCamera.backgroundColor = new Color(.25f, .31f, .37f);
+
+        weaponRoot = new GameObject("First person weapon").transform;
+        weaponRoot.SetParent(viewCamera.transform, false);
+        weaponRoot.localPosition = new Vector3(.33f, -.27f, .57f);
+        Box("Blaster body", Vector3.zero, new Vector3(.19f, .2f, .58f), weaponMat, weaponRoot);
+        Box("Blaster top rail", new Vector3(0, .11f, .01f), new Vector3(.09f, .035f, .48f), orange, weaponRoot);
+        Box("Blaster muzzle", new Vector3(0, -.015f, .34f), new Vector3(.12f, .12f, .18f), darkMetal, weaponRoot);
     }
-    public void Shoot(){ if(Time.time<fireAt||reloading)return; fireAt=Time.time+.28f;if(ammo<=0){Reload();return;}ammo--;audioSource.PlayOneShot(shotClip);if(Physics.Raycast(cam.transform.position,cam.transform.forward,out RaycastHit h,80)){var d=h.collider.GetComponentInParent<PracticeDummy>();if(d){d.Hit(h.point,cam.transform.forward);audioSource.PlayOneShot(hitClip);}} }
-    public void Reload(){if(reloading||ammo>=8||reserve<=0)return;reloading=true;reloadDone=Time.time+1.05f;audioSource.PlayOneShot(reloadClip);}
-    public void SpawnDummy(Vector3 pos){var root=new GameObject("Ragdoll practice dummy");root.transform.position=pos;root.AddComponent<PracticeDummy>();BuildRagdoll(root.transform);dummies.Add(root.GetComponent<PracticeDummy>());}
-    void BuildRagdoll(Transform root){
-        var mat=Mat(new Color(.9f,.12f,.08f)); var head=Body(root,"Head",new Vector3(0,1.65f,0),new Vector3(.38f,.38f,.34f),mat);
-        var torso=Body(root,"Torso",new Vector3(0,1.15f,0),new Vector3(.52f,.65f,.3f),mat); Link(head,torso,CharacterJointType.Spherical);
-        var pelvis=Body(root,"Pelvis",new Vector3(0,.72f,0),new Vector3(.42f,.3f,.3f),mat); Link(torso,pelvis,CharacterJointType.Spherical);
-        var lu=Body(root,"Left upper arm",new Vector3(-.43f,1.25f,0),new Vector3(.22f,.48f,.22f),mat);Link(torso,lu,CharacterJointType.Hinge);
-        var ru=Body(root,"Right upper arm",new Vector3(.43f,1.25f,0),new Vector3(.22f,.48f,.22f),mat);Link(torso,ru,CharacterJointType.Hinge);
-        var ll=Body(root,"Left leg",new Vector3(-.16f,.32f,0),new Vector3(.24f,.65f,.25f),mat);Link(pelvis,ll,CharacterJointType.Hinge);
-        var rl=Body(root,"Right leg",new Vector3(.16f,.32f,0),new Vector3(.24f,.65f,.25f),mat);Link(pelvis,rl,CharacterJointType.Hinge);
+
+    void BuildHud()
+    {
+        GameObject canvasObject = new GameObject("HUD - landscape");
+        Canvas canvas = canvasObject.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 20;
+        CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight = .5f;
+        canvasObject.AddComponent<GraphicRaycaster>();
+        if (EventSystem.current == null)
+        {
+            GameObject es = new GameObject("EventSystem");
+            es.AddComponent<EventSystem>();
+            es.AddComponent<StandaloneInputModule>();
+        }
+
+        Panel(canvas.transform, "Top information plate", new Vector2(.5f, 1), new Vector2(570, 108), new Color(.025f, .045f, .065f, .88f), new Vector2(0, -60));
+        objectiveLabel = Label(canvas.transform, "ENTRENAMIENTO   /   OBJETIVOS  00", new Vector2(.5f, 1), new Vector2(520, 35), 25, new Color(.92f, .96f, 1), TextAnchor.MiddleCenter, new Vector2(0, -42));
+        ammoLabel = Label(canvas.transform, "08  /  48", new Vector2(1, 1), new Vector2(260, 70), 34, Color.white, TextAnchor.MiddleCenter, new Vector2(-170, -58));
+        Label(canvas.transform, "BALAS", new Vector2(1, 1), new Vector2(100, 25), 15, new Color(.62f, .72f, .8f), TextAnchor.MiddleCenter, new Vector2(-170, -20));
+
+        GameObject stickBase = Panel(canvas.transform, "Move joystick", new Vector2(0, 0), new Vector2(190, 190), new Color(.035f, .07f, .1f, .5f), new Vector2(145, 140));
+        Image stickImage = stickBase.GetComponent<Image>();
+        stickImage.raycastTarget = true;
+        GameObject thumb = Panel(stickBase.transform, "Joystick thumb", new Vector2(.5f, .5f), new Vector2(76, 76), new Color(.95f, .98f, 1f, .78f), Vector2.zero);
+        thumb.GetComponent<Image>().raycastTarget = false;
+        stick = stickBase.AddComponent<MobileStick>();
+        stick.Initialize(thumb.GetComponent<RectTransform>(), 53);
+        Label(canvas.transform, "MOVE", new Vector2(0, 0), new Vector2(120, 28), 16, new Color(.76f, .84f, .9f), TextAnchor.MiddleCenter, new Vector2(145, 32));
+
+        AddButton(canvas.transform, "FIRE", new Vector2(1, 0), new Vector2(150, 150), new Color(.94f, .22f, .075f, .96f), new Vector2(-135, 148), Shoot, 27);
+        AddButton(canvas.transform, "RECARGAR", new Vector2(1, 0), new Vector2(150, 66), new Color(.09f, .19f, .27f, .96f), new Vector2(-135, 45), Reload, 18);
+        AddButton(canvas.transform, "MUÑECO", new Vector2(1, 0), new Vector2(150, 55), new Color(.11f, .27f, .24f, .95f), new Vector2(-310, 45), SpawnExtraDummy, 16);
+
+        GameObject reticleObject = Panel(canvas.transform, "Aim reticle", new Vector2(.5f, .5f), new Vector2(16, 16), new Color(1, .8f, .45f, .95f), Vector2.zero);
+        reticleObject.GetComponent<Image>().raycastTarget = false;
+        reticle = reticleObject.GetComponent<RectTransform>();
+        Panel(canvas.transform, "Reticle hole", new Vector2(.5f, .5f), new Vector2(5, 5), new Color(.04f, .055f, .07f, 1), Vector2.zero).GetComponent<Image>().raycastTarget = false;
+        messageLabel = Label(canvas.transform, "", new Vector2(.5f, .25f), new Vector2(520, 52), 20, Color.white, TextAnchor.MiddleCenter, Vector2.zero);
     }
-    Rigidbody Body(Transform p,string n,Vector3 pos,Vector3 size,Material m){var g=GameObject.CreatePrimitive(PrimitiveType.Capsule);g.name=n;g.transform.SetParent(p,true);g.transform.position=p.position+pos;g.transform.localScale=size;g.GetComponent<Renderer>().sharedMaterial=m;var rb=g.AddComponent<Rigidbody>();rb.isKinematic=true;return rb;}
-    void Link(Rigidbody a,Rigidbody b,CharacterJointType kind){var j=b.gameObject.AddComponent<CharacterJoint>();j.connectedBody=a;j.enableProjection=true;j.projectionDistance=.12f;j.anchor=new Vector3(0,.5f,0);j.connectedAnchor=new Vector3(0,-.5f,0);}
-    enum CharacterJointType{Spherical,Hinge}
+
+    GameObject Panel(Transform parent, string name, Vector2 anchor, Vector2 size, Color color, Vector2 offset)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        RectTransform rect = go.AddComponent<RectTransform>();
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.anchoredPosition = offset;
+        rect.sizeDelta = size;
+        Image image = go.AddComponent<Image>();
+        image.color = color;
+        return go;
+    }
+
+    Text Label(Transform parent, string text, Vector2 anchor, Vector2 size, int fontSize, Color color, TextAnchor alignment, Vector2 offset)
+    {
+        GameObject go = new GameObject("Text");
+        go.transform.SetParent(parent, false);
+        RectTransform rect = go.AddComponent<RectTransform>();
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.anchoredPosition = offset;
+        rect.sizeDelta = size;
+        Text t = go.AddComponent<Text>();
+        t.text = text;
+        t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (t.font == null) t.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        t.fontSize = fontSize;
+        t.fontStyle = FontStyle.Bold;
+        t.color = color;
+        t.alignment = alignment;
+        t.raycastTarget = false;
+        t.horizontalOverflow = HorizontalWrapMode.Overflow;
+        t.verticalOverflow = VerticalWrapMode.Overflow;
+        return t;
+    }
+
+    void AddButton(Transform parent, string title, Vector2 anchor, Vector2 size, Color color, Vector2 offset, UnityEngine.Events.UnityAction action, int fontSize)
+    {
+        GameObject go = Panel(parent, title + " button", anchor, size, color, offset);
+        Button button = go.AddComponent<Button>();
+        button.targetGraphic = go.GetComponent<Image>();
+        button.onClick.AddListener(action);
+        Label(go.transform, title, new Vector2(.5f, .5f), size - new Vector2(14, 12), fontSize, Color.white, TextAnchor.MiddleCenter, Vector2.zero);
+    }
+
+    void BuildAudio()
+    {
+        audioSource = gameObject.AddComponent<AudioSource>();
+        audioSource.spatialBlend = 0;
+        shotClip = Tone(115, .085f);
+        reloadClip = Tone(420, .15f);
+        hitClip = Tone(760, .075f);
+    }
+
+    AudioClip Tone(float frequency, float duration)
+    {
+        int sampleRate = 22050, count = Mathf.RoundToInt(sampleRate * duration);
+        float[] samples = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            float envelope = 1f - (float)i / count;
+            samples[i] = Mathf.Sin(2 * Mathf.PI * frequency * i / sampleRate) * envelope * .32f;
+        }
+        AudioClip clip = AudioClip.Create("Generated SFX", count, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    void Update()
+    {
+        if (controller == null || viewCamera == null) return;
+        Vector2 input = stick != null ? stick.Value : Vector2.zero;
+        float keyboardX = Input.GetAxisRaw("Horizontal"), keyboardY = Input.GetAxisRaw("Vertical");
+        if (Mathf.Abs(keyboardX) + Mathf.Abs(keyboardY) > .01f) input = new Vector2(keyboardX, keyboardY).normalized;
+        Vector3 motion = (controller.transform.forward * input.y + controller.transform.right * input.x) * 4.4f;
+        if (controller.isGrounded) verticalVelocity = -1.5f;
+        else verticalVelocity -= 18f * Time.deltaTime;
+        motion.y = verticalVelocity;
+        controller.Move(motion * Time.deltaTime);
+        UpdateTouchLook();
+        if (Input.GetMouseButton(0) && Input.mousePosition.x > Screen.width * .5f)
+        {
+            transform.Rotate(0, Input.GetAxis("Mouse X") * 2.1f, 0);
+            RotatePitch(-Input.GetAxis("Mouse Y") * 2.1f);
+        }
+        if (Input.GetKeyDown(KeyCode.Space)) Shoot();
+        if (Input.GetKeyDown(KeyCode.R)) Reload();
+        if (isReloading && Time.time >= reloadEnds)
+        {
+            int needed = Mathf.Min(8 - ammo, reserve);
+            ammo += needed; reserve -= needed; isReloading = false; UpdateHud();
+        }
+        if (messageLabel != null && Time.time > messageEnds) messageLabel.text = "";
+    }
+
+    void UpdateTouchLook()
+    {
+        if (Input.touchCount == 0) { lookFinger = -1; return; }
+        for (int i = 0; i < Input.touchCount; i++)
+        {
+            Touch t = Input.GetTouch(i);
+            if (t.position.x < Screen.width * .45f) continue;
+            if (t.phase == TouchPhase.Began)
+            {
+                if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject(t.fingerId)) continue;
+                lookFinger = t.fingerId; lookLast = t.position;
+            }
+            else if (t.fingerId == lookFinger && (t.phase == TouchPhase.Moved || t.phase == TouchPhase.Stationary))
+            {
+                Vector2 delta = t.position - lookLast;
+                lookLast = t.position;
+                transform.Rotate(0, delta.x * .13f, 0);
+                RotatePitch(-delta.y * .13f);
+            }
+            else if (t.fingerId == lookFinger && (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)) lookFinger = -1;
+        }
+    }
+
+    void RotatePitch(float amount)
+    {
+        Vector3 angles = viewCamera.transform.localEulerAngles;
+        float pitch = angles.x > 180 ? angles.x - 360 : angles.x;
+        pitch = Mathf.Clamp(pitch + amount, -78, 78);
+        viewCamera.transform.localEulerAngles = new Vector3(pitch, 0, 0);
+    }
+
+    void Shoot()
+    {
+        if (Time.time < nextShot || isReloading) return;
+        nextShot = Time.time + .24f;
+        if (ammo <= 0) { Reload(); return; }
+        ammo--; UpdateHud();
+        if (audioSource != null) audioSource.PlayOneShot(shotClip);
+        if (weaponRoot != null) { weaponRoot.localPosition = new Vector3(.33f, -.29f, .49f); CancelInvoke(nameof(ResetWeapon)); Invoke(nameof(ResetWeapon), .07f); }
+        if (Physics.Raycast(viewCamera.transform.position, viewCamera.transform.forward, out RaycastHit hit, 90))
+        {
+            PracticeDummy dummy = hit.collider.GetComponentInParent<PracticeDummy>();
+            if (dummy != null) { dummy.Hit(hit.point, viewCamera.transform.forward); if (audioSource != null) audioSource.PlayOneShot(hitClip); }
+        }
+    }
+
+    void ResetWeapon() { if (weaponRoot != null) weaponRoot.localPosition = new Vector3(.33f, -.27f, .57f); }
+
+    void Reload()
+    {
+        if (isReloading || ammo >= 8 || reserve <= 0) return;
+        isReloading = true; reloadEnds = Time.time + 1.05f;
+        if (audioSource != null) audioSource.PlayOneShot(reloadClip);
+        UpdateHud();
+    }
+
+    void UpdateHud()
+    {
+        if (objectiveLabel != null) objectiveLabel.text = "ENTRENAMIENTO   /   OBJETIVOS  " + targetsDown.ToString("00");
+        if (ammoLabel != null) ammoLabel.text = isReloading ? "RECARGANDO" : ammo.ToString("00") + "  /  " + reserve.ToString("00");
+    }
+
+    public void RegisterTargetDown()
+    {
+        targetsDown++;
+        UpdateHud();
+        ShowMessage("OBJETIVO DERRIBADO");
+    }
+
+    void SpawnExtraDummy()
+    {
+        float x = Random.Range(-7f, 7f);
+        SpawnDummy(new Vector3(x, 0, Random.Range(6f, 10f)));
+        ShowMessage("OBJETIVO DE PRÁCTICA CREADO");
+    }
+
+    void ShowMessage(string text)
+    {
+        if (messageLabel == null) return;
+        messageLabel.text = text; messageEnds = Time.time + 1.6f;
+    }
+
+    void SpawnDummy(Vector3 position)
+    {
+        GameObject root = new GameObject("Practice mannequin");
+        root.transform.position = position;
+        PracticeDummy dummy = root.AddComponent<PracticeDummy>();
+        Material mannequin = new Material(targetMat);
+        Rigidbody torso = MakePart(root.transform, "Torso", new Vector3(0, 1.17f, 0), new Vector3(.42f, .62f, .26f), mannequin, true);
+        Rigidbody head = MakePart(root.transform, "Head", new Vector3(0, 1.68f, 0), new Vector3(.31f, .31f, .31f), mannequin, false);
+        Rigidbody pelvis = MakePart(root.transform, "Pelvis", new Vector3(0, .72f, 0), new Vector3(.38f, .28f, .25f), mannequin, true);
+        Rigidbody leftArm = MakePart(root.transform, "Left arm", new Vector3(-.36f, 1.18f, 0), new Vector3(.19f, .48f, .19f), mannequin, false);
+        Rigidbody rightArm = MakePart(root.transform, "Right arm", new Vector3(.36f, 1.18f, 0), new Vector3(.19f, .48f, .19f), mannequin, false);
+        Rigidbody leftLeg = MakePart(root.transform, "Left leg", new Vector3(-.13f, .32f, 0), new Vector3(.22f, .62f, .24f), mannequin, false);
+        Rigidbody rightLeg = MakePart(root.transform, "Right leg", new Vector3(.13f, .32f, 0), new Vector3(.22f, .62f, .24f), mannequin, false);
+        Connect(head, torso, root.transform.TransformPoint(new Vector3(0, 1.45f, 0)));
+        Connect(pelvis, torso, root.transform.TransformPoint(new Vector3(0, .88f, 0)));
+        Connect(leftArm, torso, root.transform.TransformPoint(new Vector3(-.24f, 1.35f, 0)));
+        Connect(rightArm, torso, root.transform.TransformPoint(new Vector3(.24f, 1.35f, 0)));
+        Connect(leftLeg, pelvis, root.transform.TransformPoint(new Vector3(-.13f, .58f, 0)));
+        Connect(rightLeg, pelvis, root.transform.TransformPoint(new Vector3(.13f, .58f, 0)));
+        dummy.SetParts(new Rigidbody[] { torso, head, pelvis, leftArm, rightArm, leftLeg, rightLeg });
+        dummies.Add(dummy);
+    }
+
+    Rigidbody MakePart(Transform root, string name, Vector3 localPosition, Vector3 size, Material material, bool box)
+    {
+        GameObject part = GameObject.CreatePrimitive(box ? PrimitiveType.Cube : PrimitiveType.Capsule);
+        part.name = name;
+        part.transform.SetParent(root, false);
+        part.transform.localPosition = localPosition;
+        part.transform.localScale = size;
+        if (name == "Left arm") part.transform.localRotation = Quaternion.Euler(0, 0, -28);
+        else if (name == "Right arm") part.transform.localRotation = Quaternion.Euler(0, 0, 28);
+        else if (name == "Left leg") part.transform.localRotation = Quaternion.Euler(0, 0, 5);
+        else if (name == "Right leg") part.transform.localRotation = Quaternion.Euler(0, 0, -5);
+        part.GetComponent<Renderer>().sharedMaterial = material;
+        Rigidbody body = part.AddComponent<Rigidbody>();
+        body.mass = name == "Torso" ? 3 : 1;
+        body.isKinematic = true;
+        return body;
+    }
+
+    void Connect(Rigidbody child, Rigidbody parent, Vector3 worldJoint)
+    {
+        CharacterJoint joint = child.gameObject.AddComponent<CharacterJoint>();
+        joint.connectedBody = parent;
+        joint.enableProjection = true;
+        joint.projectionDistance = .08f;
+        joint.anchor = child.transform.InverseTransformPoint(worldJoint);
+        joint.connectedAnchor = parent.transform.InverseTransformPoint(worldJoint);
+    }
+
+    void ShowStartupError(System.Exception e)
+    {
+        if (viewCamera == null)
+        {
+            GameObject cameraObject = new GameObject("Startup fallback camera");
+            viewCamera = cameraObject.AddComponent<Camera>();
+            cameraObject.tag = "MainCamera";
+            viewCamera.clearFlags = CameraClearFlags.SolidColor;
+            viewCamera.backgroundColor = new Color(.06f, .09f, .13f);
+        }
+        GameObject canvasObject = new GameObject("Startup error screen");
+        Canvas canvas = canvasObject.AddComponent<Canvas>(); canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvasObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        canvasObject.AddComponent<GraphicRaycaster>();
+        Text text = Label(canvas.transform, "NO SE PUDO INICIAR LA ARENA\n" + e.GetType().Name + ": " + e.Message,
+            new Vector2(.5f, .5f), new Vector2(1100, 240), 28, Color.white, TextAnchor.MiddleCenter, Vector2.zero);
+        text.horizontalOverflow = HorizontalWrapMode.Wrap;
+    }
 }
-public class PracticeDummy:MonoBehaviour{
-    bool down;
-    public void Hit(Vector3 p,Vector3 dir){if(down)return;down=true;var r=GetComponentsInChildren<Rigidbody>();foreach(var b in r){b.isKinematic=false;b.AddForceAtPosition(dir*3.2f,p,ForceMode.Impulse);}if(FpsArenaGame.I!=null){FpsArenaGame.I.targetsDown++;}}
+
+public class MobileStick : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
+{
+    RectTransform thumb;
+    float radius = 50;
+    public Vector2 Value { get; private set; }
+    public void Initialize(RectTransform knob, float maxRadius) { thumb = knob; radius = maxRadius; }
+    public void OnPointerDown(PointerEventData e) { OnDrag(e); }
+    public void OnDrag(PointerEventData e)
+    {
+        Vector2 local;
+        RectTransformUtility.ScreenPointToLocalPointInRectangle((RectTransform)transform, e.position, e.pressEventCamera, out local);
+        Value = Vector2.ClampMagnitude(local / radius, 1);
+        if (thumb != null) thumb.anchoredPosition = Value * radius;
+    }
+    public void OnPointerUp(PointerEventData e) { Value = Vector2.zero; if (thumb != null) thumb.anchoredPosition = Vector2.zero; }
 }
+
+public class PracticeDummy : MonoBehaviour
+{
+    Rigidbody[] bodies;
+    bool toppled;
+    public void SetParts(Rigidbody[] parts) { bodies = parts; }
+    public void Hit(Vector3 point, Vector3 direction)
+    {
+        if (toppled || bodies == null) return;
+        toppled = true;
+        foreach (Rigidbody body in bodies)
+        {
+            body.isKinematic = false;
+            body.AddForceAtPosition(direction * 4.2f, point, ForceMode.Impulse);
+        }
+        if (FpsArenaGame.I != null) FpsArenaGame.I.RegisterTargetDown();
+    }
+}
+
